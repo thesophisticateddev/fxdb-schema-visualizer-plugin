@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      packages: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+          server-id: github-sdk
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      - name: Install fxdb-db locally
+        run: |
+          git clone --depth 1 https://github.com/thesophisticateddev/fxdb.git /tmp/fxdb
+          cd /tmp/fxdb
+          mvn install -pl fxdb-core,fxdb-db -am -DskipTests --batch-mode --no-transfer-progress -q
+
+      - name: Build plugin
+        run: mvn clean package --batch-mode --no-transfer-progress
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload plugin JAR
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fxdb-plugin-visualizer
+          path: target/fxdb-plugin-visualizer-*.jar
+          retention-days: 90
+
+  release:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      packages: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+          server-id: github-sdk
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      - name: Install fxdb-db locally
+        run: |
+          git clone --depth 1 https://github.com/thesophisticateddev/fxdb.git /tmp/fxdb
+          cd /tmp/fxdb
+          mvn install -pl fxdb-core,fxdb-db -am -DskipTests --batch-mode --no-transfer-progress -q
+
+      - name: Build plugin
+        run: mvn clean package --batch-mode --no-transfer-progress
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version from pom.xml
+        id: version
+        run: echo "VERSION=$(mvn help:evaluate -Dexpression=project.version -q -DforceStdout)" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.VERSION }}
+          name: v${{ steps.version.outputs.VERSION }}
+          body: |
+            Schema Visualizer Plugin v${{ steps.version.outputs.VERSION }}
+
+            Download `fxdb-plugin-visualizer-${{ steps.version.outputs.VERSION }}.jar` and place it in `~/.fxdb/plugins/`.
+          files: target/fxdb-plugin-visualizer-*.jar
+          make_latest: true
